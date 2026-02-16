@@ -1,0 +1,4 @@
+checkpoints/
+gym_tracker/
+node_modules/
+*.log

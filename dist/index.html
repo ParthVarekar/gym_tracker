@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gym Tracker</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <section class="hud" aria-live="polite">
+    <article class="card rep-card">
+      <p class="label">Reps</p>
+      <p id="rep-value" class="rep-value">0</p>
+      <p class="phase-text">Phase: <span id="phase-value">idle</span></p>
+      <label class="exercise-label" for="exercise-select">Exercise</label>
+      <select id="exercise-select" class="exercise-select">
+        <option value="pushup">Push-up</option>
+        <option value="squat">Squat</option>
+      </select>
+    </article>
+
+    <article class="card metrics-card">
+      <div class="metrics-grid">
+        <div>
+          <p class="label">ROM Score</p>
+          <p id="rom-value" class="metric-value">--</p>
+        </div>
+        <div>
+          <p class="label">Stability</p>
+          <p id="stability-value" class="metric-value">--</p>
+        </div>
+        <div>
+          <p class="label">Tempo</p>
+          <p id="tempo-value" class="metric-value">--</p>
+        </div>
+        <div>
+          <p class="label">Total</p>
+          <p id="total-value" class="metric-value">--</p>
+        </div>
+      </div>
+      <p id="status-value" class="status">Initializing...</p>
+      <button id="toggle-motion" class="motion-toggle" type="button">
+        Toggle Motion Lines
+      </button>
+    </article>
+  </section>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
