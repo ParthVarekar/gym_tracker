@@ -1,4 +1,4 @@
-import { initCamera } from "./camera.js";
+﻿import { initCamera } from "./camera.js";
 import { initPose, detectFrame } from "./poseDetector.js";
 import { drawFullFrame } from "./poseRenderer.js";
 import {
@@ -36,13 +36,16 @@ function getUiElements() {
     totalValue: document.getElementById("total-value"),
     statusValue: document.getElementById("status-value"),
     exerciseSelect: document.getElementById("exercise-select"),
-    toggleMotion: document.getElementById("toggle-motion")
+    toggleMotion: document.getElementById("toggle-motion"),
+    toggleCamera: document.getElementById("toggle-camera")
   };
 }
 
 const ui = getUiElements();
 const ctx = ui.canvas.getContext("2d");
 let appRuntime = null;
+let currentFacingMode = "user";
+let lastFrameTime = 0;
 
 function setStatus(message, isError = false) {
   ui.statusValue.textContent = message;
@@ -50,19 +53,18 @@ function setStatus(message, isError = false) {
 }
 
 function resizeCanvas(video) {
-  if (!video?.videoWidth || !video?.videoHeight) return;
+  if (!video?.videoWidth || !video?.videoHeight) {
+    return;
+  }
 
-  const dpr = window.devicePixelRatio || 1;
+  ui.canvas.width = video.videoWidth;
+  ui.canvas.height = video.videoHeight;
+  ui.canvas.style.width = "100vw";
+  ui.canvas.style.height = "100vh";
 
-  ui.canvas.width = video.videoWidth * dpr;
-  ui.canvas.height = video.videoHeight * dpr;
-
-  ui.canvas.style.width = `${video.videoWidth}px`;
-  ui.canvas.style.height = `${video.videoHeight}px`;
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  initMotionTracker(video.videoWidth, video.videoHeight);
+  const width = ui.canvas.width || video.videoWidth;
+  const height = ui.canvas.height || video.videoHeight;
+  initMotionTracker(width, height);
 }
 
 function updateToggleButton() {
@@ -80,6 +82,21 @@ function clearScoreDisplay() {
   ui.stabilityValue.textContent = "--";
   ui.tempoValue.textContent = "--";
   ui.totalValue.textContent = "--";
+}
+
+function updateDashboard(latestScore) {
+  const state = getState();
+  ui.repValue.textContent = String(state.currentReps);
+  ui.phaseValue.textContent = state.currentPhase;
+
+  if (!latestScore) {
+    return;
+  }
+
+  ui.romValue.textContent = String(latestScore.romScore);
+  ui.stabilityValue.textContent = String(latestScore.stabilityScore);
+  ui.tempoValue.textContent = String(latestScore.tempoScore);
+  ui.totalValue.textContent = String(latestScore.totalScore);
 }
 
 function applyExerciseChange(exercise) {
@@ -112,9 +129,38 @@ function bindExerciseSelector() {
     if (next === current) {
       return;
     }
+
     ui.exerciseSelect.value = options[next];
     applyExerciseChange(options[next]);
   }, { passive: false });
+}
+
+async function switchCamera() {
+  if (!ui.toggleCamera) {
+    return;
+  }
+
+  const previousMode = currentFacingMode;
+  currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+  ui.toggleCamera.disabled = true;
+  setStatus("Switching camera...");
+
+  try {
+    const video = await initCamera({ videoId: "video", facingMode: currentFacingMode });
+    currentFacingMode = video.dataset.facingMode || currentFacingMode;
+    if (appRuntime) {
+      appRuntime.video = video;
+      appRuntime.mirrored = currentFacingMode === "user";
+    }
+    resizeCanvas(video);
+    setStatus("Tracking");
+  } catch (error) {
+    currentFacingMode = previousMode;
+    const message = error instanceof Error ? error.message : "Unable to switch camera.";
+    setStatus(message, true);
+  } finally {
+    ui.toggleCamera.disabled = false;
+  }
 }
 
 function bindControls() {
@@ -129,22 +175,13 @@ function bindControls() {
     });
   }
 
-  bindExerciseSelector();
-}
-
-function updateDashboard(latestScore) {
-  const state = getState();
-  ui.repValue.textContent = String(state.currentReps);
-  ui.phaseValue.textContent = state.currentPhase;
-
-  if (!latestScore) {
-    return;
+  if (ui.toggleCamera) {
+    ui.toggleCamera.addEventListener("click", () => {
+      void switchCamera();
+    });
   }
 
-  ui.romValue.textContent = String(latestScore.romScore);
-  ui.stabilityValue.textContent = String(latestScore.stabilityScore);
-  ui.tempoValue.textContent = String(latestScore.tempoScore);
-  ui.totalValue.textContent = String(latestScore.totalScore);
+  bindExerciseSelector();
 }
 
 function extractLandmarks(results) {
@@ -191,20 +228,21 @@ function processRep(repData) {
 }
 
 function runFrame(runtime, timestamp) {
+  if (timestamp - lastFrameTime < 33) {
+    requestAnimationFrame((nextTimestamp) => runFrame(runtime, nextTimestamp));
+    return;
+  }
+  lastFrameTime = timestamp;
+
   const results = detectFrame(runtime.video, timestamp);
   const landmarks = extractLandmarks(results);
   if (landmarks) {
-    const overlayWidth = ui.canvas.clientWidth || runtime.video.videoWidth || 1;
-    const overlayHeight = ui.canvas.clientHeight || runtime.video.videoHeight || 1;
-    updateMotionTracker(
-      landmarks,
-      timestamp,
-      overlayWidth,
-      overlayHeight
-    );
+    const overlayWidth = ui.canvas.width || runtime.video.videoWidth || 1;
+    const overlayHeight = ui.canvas.height || runtime.video.videoHeight || 1;
+    updateMotionTracker(landmarks, timestamp, overlayWidth, overlayHeight);
   }
 
-  drawFullFrame(ctx, runtime.video, results);
+  drawFullFrame(ctx, runtime.video, results, runtime.mirrored);
   const angles = extractAngles(landmarks, timestamp);
   const repData = updateRepCounter(angles, getState().currentExercise);
   if (repData) {
@@ -215,22 +253,36 @@ function runFrame(runtime, timestamp) {
   requestAnimationFrame((nextTimestamp) => runFrame(runtime, nextTimestamp));
 }
 
+function handleViewportChange() {
+  if (!appRuntime?.video) {
+    return;
+  }
+
+  resizeCanvas(appRuntime.video);
+}
+
 async function startApp() {
   try {
     bindControls();
 
     setStatus("Initializing camera...");
-    const video = await initCamera("video");
+    const video = await initCamera({ videoId: "video", facingMode: currentFacingMode });
+    currentFacingMode = video.dataset.facingMode || currentFacingMode;
     resizeCanvas(video);
-    initMotionTracker(ui.canvas.width, ui.canvas.height);
-    window.addEventListener("resize", () => resizeCanvas(video));
 
     setStatus("Loading pose model...");
     await initPose();
 
     setStatus("Tracking");
-    const runtime = { video, latestScore: null };
+    const runtime = {
+      video,
+      latestScore: null,
+      mirrored: currentFacingMode === "user"
+    };
     appRuntime = runtime;
+    lastFrameTime = 0;
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("orientationchange", handleViewportChange);
     requestAnimationFrame((timestamp) => runFrame(runtime, timestamp));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to start tracker.";

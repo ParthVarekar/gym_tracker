@@ -1,5 +1,4 @@
-const MAX_HISTORY = 60;
-const MIN_VISIBILITY = 0.0;
+﻿const MAX_HISTORY = 60;
 
 const CHAIN_DEFINITIONS = [
   {
@@ -167,21 +166,25 @@ function pushTrailPoint(trail, x, y) {
   if (trail.size < MAX_HISTORY) {
     trail.size += 1;
   }
+
   return displacement;
 }
 
-function updateChain(chain, landmarks, deltaMs, canvasWidth, canvasHeight) {
+function updateChain(chain, landmarks, deltaMs, width, height) {
   let displacementSum = 0;
   let displacementCount = 0;
   for (let i = 0; i < chain.jointIndices.length; i += 1) {
     const landmark = landmarks[chain.jointIndices[i]];
-    if (!landmark) continue;
+    if (!landmark) {
+      continue;
+    }
 
-    const x = landmark.x * canvasWidth;
-    const y = landmark.y * canvasHeight;
+    const x = landmark.x * width;
+    const y = landmark.y * height;
     chain.currentVisible[i] = 1;
     chain.currentX[i] = x;
     chain.currentY[i] = y;
+
     const displacement = pushTrailPoint(chain.history[i], x, y);
     if (displacement >= 0) {
       displacementSum += displacement;
@@ -209,6 +212,7 @@ export function updateMotionTracker(landmarks, timestamp, canvasWidth, canvasHei
   tracker.lastTimestamp = timestamp;
   tracker.metrics.timestamp = timestamp;
   tracker.hasFrame = true;
+
   for (let i = 0; i < tracker.chains.length; i += 1) {
     updateChain(tracker.chains[i], landmarks, deltaMs, width, height);
   }
@@ -241,10 +245,14 @@ function drawTrailsForChain(ctx, chain) {
 }
 
 function drawSegmentsForChain(ctx, chain) {
-  ctx.strokeStyle = "#00FFFF";
-  ctx.lineWidth = 6;
-  ctx.globalAlpha = 1;
+  ctx.strokeStyle = chain.color;
+  ctx.lineWidth = 4;
+  ctx.globalAlpha = 0.95;
   for (let i = 1; i < chain.jointIndices.length; i += 1) {
+    if (!chain.currentVisible[i - 1] || !chain.currentVisible[i]) {
+      continue;
+    }
+
     ctx.beginPath();
     ctx.moveTo(chain.currentX[i - 1], chain.currentY[i - 1]);
     ctx.lineTo(chain.currentX[i], chain.currentY[i]);

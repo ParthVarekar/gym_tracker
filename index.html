@@ -1,8 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
   <title>Gym Tracker</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -42,9 +45,14 @@
         </div>
       </div>
       <p id="status-value" class="status">Initializing...</p>
-      <button id="toggle-motion" class="motion-toggle" type="button">
-        Toggle Motion Lines
-      </button>
+      <div class="controls-row">
+        <button id="toggle-motion" class="control-btn" type="button">
+          Motion Lines: ON
+        </button>
+        <button id="toggle-camera" class="control-btn" type="button">
+          Switch Camera
+        </button>
+      </div>
     </article>
   </section>
 
