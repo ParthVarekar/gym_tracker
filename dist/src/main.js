@@ -1,4 +1,8 @@
-﻿import { initCamera } from "./camera.js";
+﻿import {
+  getCurrentFacingMode,
+  initCamera,
+  switchCamera
+} from "./camera.js";
 import { initPose, detectFrame } from "./poseDetector.js";
 import { drawFullFrame } from "./poseRenderer.js";
 import {
@@ -24,240 +28,63 @@ import {
   resetMotionTracker,
   updateMotionTracker
 } from "./motionTracker.js";
+import { createUI } from "./ui.js";
 
-function getUiElements() {
-  return {
-    canvas: document.getElementById("canvas"),
-    repValue: document.getElementById("rep-value"),
-    phaseValue: document.getElementById("phase-value"),
-    romValue: document.getElementById("rom-value"),
-    stabilityValue: document.getElementById("stability-value"),
-    tempoValue: document.getElementById("tempo-value"),
-    totalValue: document.getElementById("total-value"),
-    statusValue: document.getElementById("status-value"),
-    exerciseSelect: document.getElementById("exercise-select"),
-    toggleMotion: document.getElementById("toggle-motion"),
-    toggleCamera: document.getElementById("toggle-camera"),
-    metricsPanel: document.getElementById("metrics-panel"),
-    metricsToggle: document.getElementById("metrics-toggle"),
-    metricsContent: document.getElementById("metrics-content")
-  };
-}
+const ui = createUI();
+const canvas = ui.getCanvas();
+const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
 
-const ui = getUiElements();
-const ctx = ui.canvas.getContext("2d", { alpha: true, desynchronized: true });
-let appRuntime = null;
-let currentFacingMode = "user";
+const appState = {
+  currentExercise: getState().currentExercise,
+  reps: 0,
+  phase: "idle",
+  motionLinesEnabled: true,
+  statsExpanded: false,
+  menuOpen: false,
+  cameraFacingMode: "user"
+};
+
+const runtime = {
+  video: null,
+  latestScore: null,
+  mirrored: true
+};
+
 let lastFrameTime = 0;
-let metricsExpanded = false;
-
-function isMobileViewport() {
-  return window.matchMedia("(max-width: 600px)").matches;
-}
-
-function isTabletViewport() {
-  return window.matchMedia("(max-width: 1024px)").matches;
-}
-
-function bindPress(element, handler) {
-  if (!element) {
-    return;
-  }
-
-  let touched = false;
-  element.addEventListener("touchend", (event) => {
-    touched = true;
-    event.preventDefault();
-    handler();
-  }, { passive: false });
-
-  element.addEventListener("click", () => {
-    if (touched) {
-      touched = false;
-      return;
-    }
-    handler();
-  });
-}
-
-function setMetricsExpanded(expanded, force = false) {
-  if (!ui.metricsToggle || !ui.metricsContent || !ui.metricsPanel) {
-    return;
-  }
-
-  if (!force && expanded === metricsExpanded) {
-    return;
-  }
-
-  metricsExpanded = expanded;
-  ui.metricsContent.hidden = !expanded;
-  ui.metricsPanel.dataset.collapsed = String(!expanded);
-  ui.metricsToggle.setAttribute("aria-expanded", String(expanded));
-  ui.metricsToggle.textContent = expanded
-    ? "Hide Detailed Scores"
-    : "Show Detailed Scores";
-}
-
-function syncTrackingUiState() {
-  const isTracking = ui.statusValue.textContent === "Tracking";
-  const compactMode = isMobileViewport() && isTracking;
-  document.body.classList.toggle("tracking-active", compactMode);
-  if (compactMode) {
-    setMetricsExpanded(false, true);
-  }
-}
-
-function setStatus(message, isError = false) {
-  ui.statusValue.textContent = message;
-  ui.statusValue.classList.toggle("error", isError);
-  syncTrackingUiState();
-}
+let resizeDebounce = null;
 
 function resizeCanvas(video) {
   if (!video?.videoWidth || !video?.videoHeight) {
     return;
   }
 
-  const width = Math.max(1, ui.canvas.clientWidth || window.innerWidth || 1);
-  const height = Math.max(1, ui.canvas.clientHeight || window.innerHeight || 1);
-  ui.canvas.width = width;
-  ui.canvas.height = height;
-  initMotionTracker(width, height, isMobileViewport());
+  const size = ui.getCanvasSize();
+  canvas.width = size.width;
+  canvas.height = size.height;
+  resetMotionTracker();
+  initMotionTracker(size.width, size.height);
 }
 
-function updateToggleButton() {
-  if (!ui.toggleMotion) {
-    return;
-  }
-
-  ui.toggleMotion.textContent = motionTracker.enabled
-    ? "Motion Lines: ON"
-    : "Motion Lines: OFF";
+function updateHeaderFromTracking() {
+  const tracking = getState();
+  appState.reps = tracking.currentReps;
+  appState.phase = tracking.currentPhase;
+  ui.setHeader(appState.reps, appState.phase, appState.currentExercise);
 }
 
-function clearScoreDisplay() {
-  ui.romValue.textContent = "--";
-  ui.stabilityValue.textContent = "--";
-  ui.tempoValue.textContent = "--";
-  ui.totalValue.textContent = "--";
-}
-
-function updateDashboard(latestScore) {
-  const state = getState();
-  ui.repValue.textContent = String(state.currentReps);
-  ui.phaseValue.textContent = state.currentPhase;
-
-  if (!latestScore) {
-    return;
-  }
-
-  ui.romValue.textContent = String(latestScore.romScore);
-  ui.stabilityValue.textContent = String(latestScore.stabilityScore);
-  ui.tempoValue.textContent = String(latestScore.tempoScore);
-  ui.totalValue.textContent = String(latestScore.totalScore);
+function clearScorePanel() {
+  runtime.latestScore = null;
+  ui.setScores(null);
+  ui.setHistory([]);
 }
 
 function applyExerciseChange(exercise) {
+  appState.currentExercise = exercise;
   setExercise(exercise);
   resetTrackingState();
   resetRepCounter(exercise);
-  if (appRuntime) {
-    appRuntime.latestScore = null;
-  }
-
-  clearScoreDisplay();
-  updateDashboard(null);
-}
-
-function bindExerciseSelector() {
-  if (!ui.exerciseSelect) {
-    return;
-  }
-
-  ui.exerciseSelect.value = getState().currentExercise;
-  ui.exerciseSelect.addEventListener("change", () => {
-    applyExerciseChange(ui.exerciseSelect.value);
-  });
-
-  ui.exerciseSelect.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const options = Array.from(ui.exerciseSelect.options).map((option) => option.value);
-    const currentIndex = options.indexOf(ui.exerciseSelect.value);
-    const direction = event.deltaY > 0 ? 1 : -1;
-    const nextIndex = Math.max(0, Math.min(options.length - 1, currentIndex + direction));
-    if (nextIndex === currentIndex) {
-      return;
-    }
-
-    ui.exerciseSelect.value = options[nextIndex];
-    applyExerciseChange(options[nextIndex]);
-  }, { passive: false });
-}
-
-function bindBottomNav() {
-  const navButtons = document.querySelectorAll(".nav-item");
-  navButtons.forEach((button) => {
-    bindPress(button, () => {
-      navButtons.forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-    });
-  });
-}
-
-async function switchCamera() {
-  if (!ui.toggleCamera) {
-    return;
-  }
-
-  const previousMode = currentFacingMode;
-  currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
-  ui.toggleCamera.disabled = true;
-  setStatus("Switching camera...");
-
-  try {
-    const video = await initCamera({ videoId: "video", facingMode: currentFacingMode });
-    currentFacingMode = video.dataset.facingMode || currentFacingMode;
-    if (appRuntime) {
-      appRuntime.video = video;
-      appRuntime.mirrored = currentFacingMode === "user";
-    }
-    resizeCanvas(video);
-    setStatus("Tracking");
-  } catch (error) {
-    currentFacingMode = previousMode;
-    const message = error instanceof Error ? error.message : "Unable to switch camera.";
-    setStatus(message, true);
-  } finally {
-    ui.toggleCamera.disabled = false;
-  }
-}
-
-function bindControls() {
-  if (ui.toggleMotion) {
-    updateToggleButton();
-    bindPress(ui.toggleMotion, () => {
-      motionTracker.enabled = !motionTracker.enabled;
-      if (!motionTracker.enabled) {
-        resetMotionTracker();
-      }
-      updateToggleButton();
-    });
-  }
-
-  if (ui.toggleCamera) {
-    bindPress(ui.toggleCamera, () => {
-      void switchCamera();
-    });
-  }
-
-  if (ui.metricsToggle) {
-    bindPress(ui.metricsToggle, () => {
-      setMetricsExpanded(!metricsExpanded, true);
-    });
-  }
-
-  bindExerciseSelector();
-  bindBottomNav();
+  clearScorePanel();
+  updateHeaderFromTracking();
 }
 
 function extractLandmarks(results) {
@@ -303,78 +130,129 @@ function processRep(repData) {
   return score;
 }
 
-function runFrame(runtime, timestamp) {
-  if (timestamp - lastFrameTime < 33) {
-    requestAnimationFrame((nextTimestamp) => runFrame(runtime, nextTimestamp));
+function updatePanels() {
+  const tracking = getState();
+  ui.setHistory(tracking.repHistory);
+  ui.setScores(runtime.latestScore);
+}
+
+function runFrame(timestamp) {
+  if (!runtime.video) {
+    return;
+  }
+
+  if (timestamp - lastFrameTime < 30) {
+    requestAnimationFrame(runFrame);
     return;
   }
   lastFrameTime = timestamp;
 
   const results = detectFrame(runtime.video, timestamp);
   const landmarks = extractLandmarks(results);
-  if (landmarks) {
-    const width = Math.max(1, ui.canvas.clientWidth || window.innerWidth || 1);
-    const height = Math.max(1, ui.canvas.clientHeight || window.innerHeight || 1);
-    updateMotionTracker(landmarks, timestamp, width, height, isMobileViewport());
-  }
+  const size = ui.getCanvasSize();
 
-  drawFullFrame(ctx, runtime.video, results, runtime.mirrored);
+  updateMotionTracker(landmarks, timestamp, size.width, size.height);
+
+  drawFullFrame(ctx, runtime.video, results, {
+    mirrored: runtime.mirrored,
+    showMotionLines: appState.motionLinesEnabled
+  });
 
   const angles = extractAngles(landmarks, timestamp);
-  const repData = updateRepCounter(angles, getState().currentExercise);
+  const repData = updateRepCounter(angles, appState.currentExercise);
   if (repData) {
     runtime.latestScore = processRep(repData);
   }
 
-  updateDashboard(runtime.latestScore);
-  requestAnimationFrame((nextTimestamp) => runFrame(runtime, nextTimestamp));
+  updateHeaderFromTracking();
+  updatePanels();
+  requestAnimationFrame(runFrame);
 }
 
-function handleViewportChange() {
-  if (!appRuntime?.video) {
-    return;
+async function handleSwitchCamera() {
+  ui.setCameraBusy(true);
+  ui.setStatus("Switching camera...");
+
+  try {
+    runtime.video = await switchCamera("video");
+    appState.cameraFacingMode = getCurrentFacingMode();
+    runtime.mirrored = appState.cameraFacingMode === "user";
+    ui.setCameraFacingMode(appState.cameraFacingMode);
+    resizeCanvas(runtime.video);
+    ui.setStatus("Tracking");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to switch camera.";
+    ui.setStatus(message, true);
+  } finally {
+    ui.setCameraBusy(false);
+  }
+}
+
+function bindUiEvents() {
+  ui.onExerciseChange((exercise) => {
+    applyExerciseChange(exercise);
+  });
+
+  ui.onMotionToggle(() => {
+    appState.motionLinesEnabled = !appState.motionLinesEnabled;
+    motionTracker.enabled = appState.motionLinesEnabled;
+    ui.setMotionLinesEnabled(appState.motionLinesEnabled);
+  });
+
+  ui.onCameraToggle(() => {
+    void handleSwitchCamera();
+  });
+
+  ui.onMenuToggle((open) => {
+    appState.menuOpen = open;
+  });
+
+  ui.onStatsToggle((expanded) => {
+    appState.statsExpanded = expanded;
+  });
+}
+
+function handleResize() {
+  if (resizeDebounce) {
+    clearTimeout(resizeDebounce);
   }
 
-  resizeCanvas(appRuntime.video);
-  if (isTabletViewport()) {
-    setMetricsExpanded(false, true);
-  } else {
-    setMetricsExpanded(true, true);
-  }
-  syncTrackingUiState();
+  resizeDebounce = setTimeout(() => {
+    if (!runtime.video) {
+      return;
+    }
+
+    resizeCanvas(runtime.video);
+  }, 120);
 }
 
 async function startApp() {
   try {
-    bindControls();
-    setMetricsExpanded(!isTabletViewport(), true);
+    bindUiEvents();
+    ui.setMotionLinesEnabled(appState.motionLinesEnabled);
+    ui.setHeader(appState.reps, appState.phase, appState.currentExercise);
+    clearScorePanel();
 
-    setStatus("Initializing camera...");
-    const video = await initCamera({ videoId: "video", facingMode: currentFacingMode });
-    currentFacingMode = video.dataset.facingMode || currentFacingMode;
-    resizeCanvas(video);
+    ui.setStatus("Initializing camera...");
+    runtime.video = await initCamera({ videoId: "video", facingMode: appState.cameraFacingMode });
+    appState.cameraFacingMode = getCurrentFacingMode();
+    runtime.mirrored = appState.cameraFacingMode === "user";
+    ui.setCameraFacingMode(appState.cameraFacingMode);
+    resizeCanvas(runtime.video);
 
-    setStatus("Loading pose model...");
+    ui.setStatus("Loading pose model...");
     await initPose();
 
-    setStatus("Tracking");
-    const runtime = {
-      video,
-      latestScore: null,
-      mirrored: currentFacingMode === "user"
-    };
-    appRuntime = runtime;
+    ui.setStatus("Tracking");
     lastFrameTime = 0;
 
-    window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("orientationchange", () => {
-      setTimeout(handleViewportChange, 120);
-    });
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
 
-    requestAnimationFrame((frameTimestamp) => runFrame(runtime, frameTimestamp));
+    requestAnimationFrame(runFrame);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to start tracker.";
-    setStatus(message, true);
+    ui.setStatus(message, true);
   }
 }
 

@@ -1,18 +1,16 @@
 ﻿let activeStream = null;
+let currentFacingMode = "user";
 
 function isMobileDevice() {
-  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return /Mobi|Android|iPhone/i.test(navigator.userAgent);
 }
 
-function buildConstraints(facingMode) {
+function buildVideoConstraints(facingMode) {
   const mobile = isMobileDevice();
   return {
-    audio: false,
-    video: {
-      width: { ideal: mobile ? 640 : 1280 },
-      height: { ideal: mobile ? 480 : 720 },
-      facingMode: { ideal: facingMode }
-    }
+    width: { ideal: mobile ? 640 : 1280 },
+    height: { ideal: mobile ? 480 : 720 },
+    facingMode: { ideal: facingMode }
   };
 }
 
@@ -35,22 +33,18 @@ async function waitForMetadata(video) {
   });
 }
 
-function normalizeOptions(options = {}) {
-  if (typeof options === "string") {
-    return { videoId: options, facingMode: "user" };
-  }
-
-  return {
-    videoId: options.videoId || "video",
-    facingMode: options.facingMode || "user"
-  };
+async function requestStream(facingMode) {
+  return navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: buildVideoConstraints(facingMode)
+  });
 }
 
 function fallbackFacingMode(mode) {
   return mode === "user" ? "environment" : "user";
 }
 
-function mapCameraError(error) {
+function getCameraError(error) {
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
     return "Camera access denied. Allow permission and reload.";
   }
@@ -62,37 +56,16 @@ function mapCameraError(error) {
   return "Unable to start camera stream.";
 }
 
-async function getStreamForFacingMode(facingMode) {
-  const constraints = buildConstraints(facingMode);
-  return navigator.mediaDevices.getUserMedia(constraints);
-}
-
-export async function initCamera(options = {}) {
-  const { videoId, facingMode } = normalizeOptions(options);
+function getVideoElement(videoId = "video") {
   const video = document.getElementById(videoId);
   if (!video) {
     throw new Error(`Missing video element: #${videoId}`);
   }
 
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Camera API is not supported in this browser.");
-  }
+  return video;
+}
 
-  stopActiveStream();
-
-  let stream;
-  let resolvedMode = facingMode;
-  try {
-    stream = await getStreamForFacingMode(facingMode);
-  } catch (primaryError) {
-    resolvedMode = fallbackFacingMode(facingMode);
-    try {
-      stream = await getStreamForFacingMode(resolvedMode);
-    } catch {
-      throw new Error(mapCameraError(primaryError));
-    }
-  }
-
+async function attachStreamToVideo(video, stream, facingMode) {
   video.srcObject = stream;
   video.playsInline = true;
   video.muted = true;
@@ -100,6 +73,41 @@ export async function initCamera(options = {}) {
   await video.play();
 
   activeStream = stream;
-  video.dataset.facingMode = resolvedMode;
+  currentFacingMode = facingMode;
+  video.dataset.facingMode = facingMode;
   return video;
+}
+
+export async function initCamera(options = {}) {
+  const videoId = options.videoId || "video";
+  const preferredMode = options.facingMode || currentFacingMode;
+  const video = getVideoElement(videoId);
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Camera API is not supported in this browser.");
+  }
+
+  stopActiveStream();
+
+  try {
+    const stream = await requestStream(preferredMode);
+    return attachStreamToVideo(video, stream, preferredMode);
+  } catch (primaryError) {
+    const fallbackMode = fallbackFacingMode(preferredMode);
+    try {
+      const stream = await requestStream(fallbackMode);
+      return attachStreamToVideo(video, stream, fallbackMode);
+    } catch {
+      throw new Error(getCameraError(primaryError));
+    }
+  }
+}
+
+export async function switchCamera(videoId = "video") {
+  const nextMode = currentFacingMode === "user" ? "environment" : "user";
+  return initCamera({ videoId, facingMode: nextMode });
+}
+
+export function getCurrentFacingMode() {
+  return currentFacingMode;
 }
