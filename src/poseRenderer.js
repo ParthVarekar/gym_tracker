@@ -5,10 +5,17 @@
 } from "./vendor/vision_bundle.mjs";
 import { drawMotionOverlay } from "./motionTracker.js";
 
-const CONNECTOR_STYLE = { color: "#30d158", lineWidth: 4 };
-const LANDMARK_STYLE = { color: "#f8fafc", lineWidth: 1, radius: 3 };
-const HAND_CONNECTOR_STYLE = { color: "#00e5ff", lineWidth: 3 };
-const HAND_LANDMARK_STYLE = { color: "#ffffff", lineWidth: 1, radius: 2.5 };
+const CONNECTOR_STYLE = { color: "#31f381", lineWidth: 3.5 };
+const LANDMARK_STYLE = { color: "#f8fbff", lineWidth: 1, radius: 2.8 };
+const HAND_CONNECTOR_STYLE = { color: "#57ecff", lineWidth: 2.5 };
+const HAND_LANDMARK_STYLE = { color: "#ffffff", lineWidth: 1, radius: 2.2 };
+
+function getCanvasSize(ctx) {
+  return {
+    width: Math.max(1, ctx.canvas.clientWidth || window.innerWidth || 1),
+    height: Math.max(1, ctx.canvas.clientHeight || window.innerHeight || 1)
+  };
+}
 
 function getPoseLandmarks(results) {
   if (!results) {
@@ -68,29 +75,24 @@ function applyMirrorTransform(ctx, width, mirrored) {
 }
 
 export function drawPose(ctx, video, results, mirrored = false) {
-  const drawWidth = ctx.canvas.width || video.videoWidth || ctx.canvas.clientWidth;
-  const drawHeight = ctx.canvas.height || video.videoHeight || ctx.canvas.clientHeight;
-  clearFrame(ctx, drawWidth, drawHeight);
-  applyMirrorTransform(ctx, drawWidth, mirrored);
-  ctx.drawImage(video, 0, 0, drawWidth, drawHeight);
+  const { width, height } = getCanvasSize(ctx);
+  clearFrame(ctx, width, height);
+  applyMirrorTransform(ctx, width, mirrored);
+  ctx.drawImage(video, 0, 0, width, height);
 
   const poseLandmarks = getPoseLandmarks(results);
-  if (!poseLandmarks.length) {
-    ctx.restore();
-    return;
+  if (poseLandmarks.length) {
+    drawLandmarkSet(ctx, poseLandmarks);
   }
 
-  drawLandmarkSet(ctx, poseLandmarks);
   ctx.restore();
 }
 
 export function drawFullFrame(ctx, video, results, mirrored = false) {
-  const drawWidth = ctx.canvas.width || video.videoWidth || ctx.canvas.clientWidth;
-  const drawHeight = ctx.canvas.height || video.videoHeight || ctx.canvas.clientHeight;
-
-  clearFrame(ctx, drawWidth, drawHeight);
-  applyMirrorTransform(ctx, drawWidth, mirrored);
-  ctx.drawImage(video, 0, 0, drawWidth, drawHeight);
+  const { width, height } = getCanvasSize(ctx);
+  clearFrame(ctx, width, height);
+  applyMirrorTransform(ctx, width, mirrored);
+  ctx.drawImage(video, 0, 0, width, height);
 
   const poseLandmarks = getPoseLandmarks(results);
   if (poseLandmarks.length) {

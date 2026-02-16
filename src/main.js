@@ -37,19 +37,80 @@ function getUiElements() {
     statusValue: document.getElementById("status-value"),
     exerciseSelect: document.getElementById("exercise-select"),
     toggleMotion: document.getElementById("toggle-motion"),
-    toggleCamera: document.getElementById("toggle-camera")
+    toggleCamera: document.getElementById("toggle-camera"),
+    metricsPanel: document.getElementById("metrics-panel"),
+    metricsToggle: document.getElementById("metrics-toggle"),
+    metricsContent: document.getElementById("metrics-content")
   };
 }
 
 const ui = getUiElements();
-const ctx = ui.canvas.getContext("2d");
+const ctx = ui.canvas.getContext("2d", { alpha: true, desynchronized: true });
 let appRuntime = null;
 let currentFacingMode = "user";
 let lastFrameTime = 0;
+let metricsExpanded = false;
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 600px)").matches;
+}
+
+function isTabletViewport() {
+  return window.matchMedia("(max-width: 1024px)").matches;
+}
+
+function bindPress(element, handler) {
+  if (!element) {
+    return;
+  }
+
+  let touched = false;
+  element.addEventListener("touchend", (event) => {
+    touched = true;
+    event.preventDefault();
+    handler();
+  }, { passive: false });
+
+  element.addEventListener("click", () => {
+    if (touched) {
+      touched = false;
+      return;
+    }
+    handler();
+  });
+}
+
+function setMetricsExpanded(expanded, force = false) {
+  if (!ui.metricsToggle || !ui.metricsContent || !ui.metricsPanel) {
+    return;
+  }
+
+  if (!force && expanded === metricsExpanded) {
+    return;
+  }
+
+  metricsExpanded = expanded;
+  ui.metricsContent.hidden = !expanded;
+  ui.metricsPanel.dataset.collapsed = String(!expanded);
+  ui.metricsToggle.setAttribute("aria-expanded", String(expanded));
+  ui.metricsToggle.textContent = expanded
+    ? "Hide Detailed Scores"
+    : "Show Detailed Scores";
+}
+
+function syncTrackingUiState() {
+  const isTracking = ui.statusValue.textContent === "Tracking";
+  const compactMode = isMobileViewport() && isTracking;
+  document.body.classList.toggle("tracking-active", compactMode);
+  if (compactMode) {
+    setMetricsExpanded(false, true);
+  }
+}
 
 function setStatus(message, isError = false) {
   ui.statusValue.textContent = message;
   ui.statusValue.classList.toggle("error", isError);
+  syncTrackingUiState();
 }
 
 function resizeCanvas(video) {
@@ -57,14 +118,11 @@ function resizeCanvas(video) {
     return;
   }
 
-  ui.canvas.width = video.videoWidth;
-  ui.canvas.height = video.videoHeight;
-  ui.canvas.style.width = "100vw";
-  ui.canvas.style.height = "100vh";
-
-  const width = ui.canvas.width || video.videoWidth;
-  const height = ui.canvas.height || video.videoHeight;
-  initMotionTracker(width, height);
+  const width = Math.max(1, ui.canvas.clientWidth || window.innerWidth || 1);
+  const height = Math.max(1, ui.canvas.clientHeight || window.innerHeight || 1);
+  ui.canvas.width = width;
+  ui.canvas.height = height;
+  initMotionTracker(width, height, isMobileViewport());
 }
 
 function updateToggleButton() {
@@ -106,6 +164,7 @@ function applyExerciseChange(exercise) {
   if (appRuntime) {
     appRuntime.latestScore = null;
   }
+
   clearScoreDisplay();
   updateDashboard(null);
 }
@@ -123,16 +182,26 @@ function bindExerciseSelector() {
   ui.exerciseSelect.addEventListener("wheel", (event) => {
     event.preventDefault();
     const options = Array.from(ui.exerciseSelect.options).map((option) => option.value);
-    const current = options.indexOf(ui.exerciseSelect.value);
+    const currentIndex = options.indexOf(ui.exerciseSelect.value);
     const direction = event.deltaY > 0 ? 1 : -1;
-    const next = Math.max(0, Math.min(options.length - 1, current + direction));
-    if (next === current) {
+    const nextIndex = Math.max(0, Math.min(options.length - 1, currentIndex + direction));
+    if (nextIndex === currentIndex) {
       return;
     }
 
-    ui.exerciseSelect.value = options[next];
-    applyExerciseChange(options[next]);
+    ui.exerciseSelect.value = options[nextIndex];
+    applyExerciseChange(options[nextIndex]);
   }, { passive: false });
+}
+
+function bindBottomNav() {
+  const navButtons = document.querySelectorAll(".nav-item");
+  navButtons.forEach((button) => {
+    bindPress(button, () => {
+      navButtons.forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+    });
+  });
 }
 
 async function switchCamera() {
@@ -166,7 +235,7 @@ async function switchCamera() {
 function bindControls() {
   if (ui.toggleMotion) {
     updateToggleButton();
-    ui.toggleMotion.addEventListener("click", () => {
+    bindPress(ui.toggleMotion, () => {
       motionTracker.enabled = !motionTracker.enabled;
       if (!motionTracker.enabled) {
         resetMotionTracker();
@@ -176,12 +245,19 @@ function bindControls() {
   }
 
   if (ui.toggleCamera) {
-    ui.toggleCamera.addEventListener("click", () => {
+    bindPress(ui.toggleCamera, () => {
       void switchCamera();
     });
   }
 
+  if (ui.metricsToggle) {
+    bindPress(ui.metricsToggle, () => {
+      setMetricsExpanded(!metricsExpanded, true);
+    });
+  }
+
   bindExerciseSelector();
+  bindBottomNav();
 }
 
 function extractLandmarks(results) {
@@ -237,12 +313,13 @@ function runFrame(runtime, timestamp) {
   const results = detectFrame(runtime.video, timestamp);
   const landmarks = extractLandmarks(results);
   if (landmarks) {
-    const overlayWidth = ui.canvas.width || runtime.video.videoWidth || 1;
-    const overlayHeight = ui.canvas.height || runtime.video.videoHeight || 1;
-    updateMotionTracker(landmarks, timestamp, overlayWidth, overlayHeight);
+    const width = Math.max(1, ui.canvas.clientWidth || window.innerWidth || 1);
+    const height = Math.max(1, ui.canvas.clientHeight || window.innerHeight || 1);
+    updateMotionTracker(landmarks, timestamp, width, height, isMobileViewport());
   }
 
   drawFullFrame(ctx, runtime.video, results, runtime.mirrored);
+
   const angles = extractAngles(landmarks, timestamp);
   const repData = updateRepCounter(angles, getState().currentExercise);
   if (repData) {
@@ -259,11 +336,18 @@ function handleViewportChange() {
   }
 
   resizeCanvas(appRuntime.video);
+  if (isTabletViewport()) {
+    setMetricsExpanded(false, true);
+  } else {
+    setMetricsExpanded(true, true);
+  }
+  syncTrackingUiState();
 }
 
 async function startApp() {
   try {
     bindControls();
+    setMetricsExpanded(!isTabletViewport(), true);
 
     setStatus("Initializing camera...");
     const video = await initCamera({ videoId: "video", facingMode: currentFacingMode });
@@ -281,9 +365,13 @@ async function startApp() {
     };
     appRuntime = runtime;
     lastFrameTime = 0;
+
     window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("orientationchange", handleViewportChange);
-    requestAnimationFrame((timestamp) => runFrame(runtime, timestamp));
+    window.addEventListener("orientationchange", () => {
+      setTimeout(handleViewportChange, 120);
+    });
+
+    requestAnimationFrame((frameTimestamp) => runFrame(runtime, frameTimestamp));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to start tracker.";
     setStatus(message, true);

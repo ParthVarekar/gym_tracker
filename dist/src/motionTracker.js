@@ -1,51 +1,52 @@
-﻿const MAX_HISTORY = 60;
+﻿const MAX_HISTORY_DESKTOP = 60;
+const MAX_HISTORY_MOBILE = 30;
 
 const CHAIN_DEFINITIONS = [
   {
     key: "upperBodyChain",
     name: "Upper Body",
     jointIndices: [11, 12, 24, 23],
-    color: "#22d3ee"
+    color: "#7df9ff"
   },
   {
     key: "lowerBodyChain",
     name: "Lower Body",
     jointIndices: [23, 24, 26, 25],
-    color: "#f59e0b"
+    color: "#b7f8ff"
   },
   {
     key: "leftArmChain",
     name: "Left Arm",
     jointIndices: [11, 13, 15],
-    color: "#38bdf8"
+    color: "#46e1ff"
   },
   {
     key: "rightArmChain",
     name: "Right Arm",
     jointIndices: [12, 14, 16],
-    color: "#818cf8"
+    color: "#a4edff"
   },
   {
     key: "leftLegChain",
     name: "Left Leg",
     jointIndices: [23, 25, 27],
-    color: "#34d399"
+    color: "#5fd7ff"
   },
   {
     key: "rightLegChain",
     name: "Right Leg",
     jointIndices: [24, 26, 28],
-    color: "#fb7185"
+    color: "#d3f4ff"
   }
 ];
 
 const ANGLE_DEFINITIONS = [
-  { jointIndices: [11, 13, 15], color: "#9fe7ff" },
-  { jointIndices: [12, 14, 16], color: "#c3c9ff" },
-  { jointIndices: [23, 25, 27], color: "#b8ffd8" },
-  { jointIndices: [24, 26, 28], color: "#ffc0cb" },
-  { jointIndices: [11, 23, 25], color: "#7eead6" },
-  { jointIndices: [12, 24, 26], color: "#ffd38a" }
+  { jointIndices: [11, 13, 15], color: "#d6f9ff" },
+  { jointIndices: [12, 14, 16], color: "#d6f9ff" },
+  { jointIndices: [23, 25, 27], color: "#d6f9ff" },
+  { jointIndices: [24, 26, 28], color: "#d6f9ff" },
+  { jointIndices: [11, 23, 25], color: "#f7fdff" },
+  { jointIndices: [12, 24, 26], color: "#f7fdff" }
 ];
 
 export const motionTracker = { enabled: true };
@@ -53,6 +54,8 @@ export const motionTracker = { enabled: true };
 const tracker = {
   width: 1,
   height: 1,
+  historyLimit: MAX_HISTORY_DESKTOP,
+  isMobile: false,
   lastTimestamp: 0,
   hasFrame: false,
   latestLandmarks: null,
@@ -76,8 +79,8 @@ const tracker = {
 
 function createTrailBuffer() {
   return {
-    x: new Float32Array(MAX_HISTORY),
-    y: new Float32Array(MAX_HISTORY),
+    x: new Float32Array(MAX_HISTORY_DESKTOP),
+    y: new Float32Array(MAX_HISTORY_DESKTOP),
     head: 0,
     size: 0,
     lastX: Number.NaN,
@@ -129,9 +132,15 @@ function resetChain(chain) {
   tracker.metrics[chain.key] = 0;
 }
 
-export function initMotionTracker(canvasWidth, canvasHeight) {
+function updateHistoryLimit(isMobile) {
+  tracker.isMobile = !!isMobile;
+  tracker.historyLimit = tracker.isMobile ? MAX_HISTORY_MOBILE : MAX_HISTORY_DESKTOP;
+}
+
+export function initMotionTracker(canvasWidth, canvasHeight, isMobile = false) {
   tracker.width = Math.max(1, canvasWidth || 1);
   tracker.height = Math.max(1, canvasHeight || 1);
+  updateHistoryLimit(isMobile);
   if (!tracker.chains.length) {
     initializeChains();
   }
@@ -148,10 +157,6 @@ export function resetMotionTracker() {
   }
 }
 
-function isLandmarkVisible(landmark) {
-  return !!landmark;
-}
-
 function pushTrailPoint(trail, x, y) {
   let displacement = -1;
   if (Number.isFinite(trail.lastX) && Number.isFinite(trail.lastY)) {
@@ -162,8 +167,8 @@ function pushTrailPoint(trail, x, y) {
   trail.lastY = y;
   trail.x[trail.head] = x;
   trail.y[trail.head] = y;
-  trail.head = (trail.head + 1) % MAX_HISTORY;
-  if (trail.size < MAX_HISTORY) {
+  trail.head = (trail.head + 1) % MAX_HISTORY_DESKTOP;
+  if (trail.size < MAX_HISTORY_DESKTOP) {
     trail.size += 1;
   }
 
@@ -173,6 +178,8 @@ function pushTrailPoint(trail, x, y) {
 function updateChain(chain, landmarks, deltaMs, width, height) {
   let displacementSum = 0;
   let displacementCount = 0;
+  chain.currentVisible.fill(0);
+
   for (let i = 0; i < chain.jointIndices.length; i += 1) {
     const landmark = landmarks[chain.jointIndices[i]];
     if (!landmark) {
@@ -197,15 +204,20 @@ function updateChain(chain, landmarks, deltaMs, width, height) {
   tracker.metrics[chain.key] = chain.speed;
 }
 
-export function updateMotionTracker(landmarks, timestamp, canvasWidth, canvasHeight) {
+export function updateMotionTracker(
+  landmarks,
+  timestamp,
+  canvasWidth,
+  canvasHeight,
+  isMobile = false
+) {
   if (!landmarks?.length) {
     return;
   }
 
-  const width = Math.max(1, canvasWidth || tracker.width);
-  const height = Math.max(1, canvasHeight || tracker.height);
-  tracker.width = width;
-  tracker.height = height;
+  updateHistoryLimit(isMobile);
+  tracker.width = Math.max(1, canvasWidth || tracker.width);
+  tracker.height = Math.max(1, canvasHeight || tracker.height);
 
   const deltaMs = tracker.hasFrame ? Math.max(1, timestamp - tracker.lastTimestamp) : 16.67;
   tracker.latestLandmarks = landmarks;
@@ -214,28 +226,30 @@ export function updateMotionTracker(landmarks, timestamp, canvasWidth, canvasHei
   tracker.hasFrame = true;
 
   for (let i = 0; i < tracker.chains.length; i += 1) {
-    updateChain(tracker.chains[i], landmarks, deltaMs, width, height);
+    updateChain(tracker.chains[i], landmarks, deltaMs, tracker.width, tracker.height);
   }
 }
 
-function getTrailIndex(trail, offset) {
-  const start = trail.head - trail.size;
-  return (start + offset + MAX_HISTORY) % MAX_HISTORY;
+function trailIndex(trail, offset, available) {
+  const start = trail.head - available;
+  return (start + offset + MAX_HISTORY_DESKTOP) % MAX_HISTORY_DESKTOP;
 }
 
 function drawTrailsForChain(ctx, chain) {
   ctx.strokeStyle = chain.color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = tracker.isMobile ? 1.35 : 1.7;
+
   for (let joint = 0; joint < chain.history.length; joint += 1) {
     const trail = chain.history[joint];
-    if (trail.size < 2) {
+    const available = Math.min(trail.size, tracker.historyLimit);
+    if (available < 2) {
       continue;
     }
 
-    for (let step = 1; step < trail.size; step += 1) {
-      const indexA = getTrailIndex(trail, step - 1);
-      const indexB = getTrailIndex(trail, step);
-      ctx.globalAlpha = (step / trail.size) * 0.7;
+    for (let step = 1; step < available; step += 1) {
+      const indexA = trailIndex(trail, step - 1, available);
+      const indexB = trailIndex(trail, step, available);
+      ctx.globalAlpha = (step / available) * (tracker.isMobile ? 0.38 : 0.52);
       ctx.beginPath();
       ctx.moveTo(trail.x[indexA], trail.y[indexA]);
       ctx.lineTo(trail.x[indexB], trail.y[indexB]);
@@ -245,9 +259,10 @@ function drawTrailsForChain(ctx, chain) {
 }
 
 function drawSegmentsForChain(ctx, chain) {
-  ctx.strokeStyle = chain.color;
-  ctx.lineWidth = 4;
-  ctx.globalAlpha = 0.95;
+  ctx.strokeStyle = "#7cf9ff";
+  ctx.lineWidth = tracker.isMobile ? 2.1 : 2.6;
+  ctx.globalAlpha = 0.94;
+
   for (let i = 1; i < chain.jointIndices.length; i += 1) {
     if (!chain.currentVisible[i - 1] || !chain.currentVisible[i]) {
       continue;
@@ -283,7 +298,7 @@ function drawSingleAngle(ctx, landmarks, definition) {
   const a = landmarks[definition.jointIndices[0]];
   const b = landmarks[definition.jointIndices[1]];
   const c = landmarks[definition.jointIndices[2]];
-  if (!isLandmarkVisible(a) || !isLandmarkVisible(b) || !isLandmarkVisible(c)) {
+  if (!a || !b || !c) {
     return;
   }
 
@@ -292,11 +307,11 @@ function drawSingleAngle(ctx, landmarks, definition) {
     return;
   }
 
-  const x = b.x * tracker.width + 8;
-  const y = b.y * tracker.height - 8;
+  const x = b.x * tracker.width + 7;
+  const y = b.y * tracker.height - 7;
   const text = `${Math.round(angle)} deg`;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
-  ctx.fillRect(x - 4, y - 12, 52, 14);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+  ctx.fillRect(x - 3, y - 11, 56, 14);
   ctx.fillStyle = definition.color;
   ctx.fillText(text, x, y);
 }
@@ -306,8 +321,9 @@ function drawAngleLabels(ctx) {
     return;
   }
 
-  ctx.font = "12px Segoe UI";
+  ctx.font = tracker.isMobile ? "11px Segoe UI" : "12px Segoe UI";
   ctx.textBaseline = "middle";
+
   for (let i = 0; i < ANGLE_DEFINITIONS.length; i += 1) {
     drawSingleAngle(ctx, tracker.latestLandmarks, ANGLE_DEFINITIONS[i]);
   }
@@ -321,7 +337,15 @@ export function drawMotionOverlay(ctx) {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.globalAlpha = 1;
+
+  for (let i = 0; i < tracker.chains.length; i += 1) {
+    drawTrailsForChain(ctx, tracker.chains[i]);
+  }
+
+  for (let i = 0; i < tracker.chains.length; i += 1) {
+    drawSegmentsForChain(ctx, tracker.chains[i]);
+  }
+
   drawAngleLabels(ctx);
   ctx.restore();
 }

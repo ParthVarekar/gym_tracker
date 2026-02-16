@@ -13,39 +13,56 @@
   <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
 
-  <section class="hud" aria-live="polite">
-    <article class="card rep-card">
+  <header class="panel top-panel" aria-live="polite">
+    <div class="reps-wrap">
       <p class="label">Reps</p>
       <p id="rep-value" class="rep-value">0</p>
+    </div>
+    <div class="top-meta">
       <p class="phase-text">Phase: <span id="phase-value">idle</span></p>
       <label class="exercise-label" for="exercise-select">Exercise</label>
       <select id="exercise-select" class="exercise-select">
         <option value="pushup">Push-up</option>
         <option value="squat">Squat</option>
       </select>
-    </article>
+    </div>
+  </header>
 
-    <article class="card metrics-card">
-      <div class="metrics-grid">
-        <div>
-          <p class="label">ROM Score</p>
-          <p id="rom-value" class="metric-value">--</p>
-        </div>
-        <div>
-          <p class="label">Stability</p>
-          <p id="stability-value" class="metric-value">--</p>
-        </div>
-        <div>
-          <p class="label">Tempo</p>
-          <p id="tempo-value" class="metric-value">--</p>
-        </div>
-        <div>
-          <p class="label">Total</p>
-          <p id="total-value" class="metric-value">--</p>
+  <div class="bottom-stack">
+    <section id="metrics-panel" class="panel metrics-panel" data-collapsed="true">
+      <button
+        id="metrics-toggle"
+        class="metrics-toggle"
+        type="button"
+        aria-expanded="false"
+      >
+        Show Detailed Scores
+      </button>
+      <div id="metrics-content" class="metrics-content" hidden>
+        <div class="metrics-grid">
+          <div class="metric-item">
+            <p class="label">ROM</p>
+            <p id="rom-value" class="metric-value">--</p>
+          </div>
+          <div class="metric-item">
+            <p class="label">Stability</p>
+            <p id="stability-value" class="metric-value">--</p>
+          </div>
+          <div class="metric-item">
+            <p class="label">Tempo</p>
+            <p id="tempo-value" class="metric-value">--</p>
+          </div>
+          <div class="metric-item">
+            <p class="label">Total</p>
+            <p id="total-value" class="metric-value">--</p>
+          </div>
         </div>
       </div>
+    </section>
+
+    <section class="panel controls-panel">
       <p id="status-value" class="status">Initializing...</p>
-      <div class="controls-row">
+      <div class="controls-grid">
         <button id="toggle-motion" class="control-btn" type="button">
           Motion Lines: ON
         </button>
@@ -53,8 +70,15 @@
           Switch Camera
         </button>
       </div>
-    </article>
-  </section>
+    </section>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Primary">
+    <button class="nav-item active" type="button">Home</button>
+    <button class="nav-item" type="button">Workouts</button>
+    <button class="nav-item" type="button">History</button>
+    <button class="nav-item" type="button">Settings</button>
+  </nav>
 
   <script type="module" src="./src/main.js"></script>
 </body>

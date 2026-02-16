@@ -9,19 +9,20 @@ function buildConstraints(facingMode) {
   return {
     audio: false,
     video: {
-      width: { ideal: mobile ? 480 : 1280 },
-      height: { ideal: mobile ? 360 : 720 },
+      width: { ideal: mobile ? 640 : 1280 },
+      height: { ideal: mobile ? 480 : 720 },
       facingMode: { ideal: facingMode }
     }
   };
 }
 
-function stopStream(stream) {
-  if (!stream) {
+function stopActiveStream() {
+  if (!activeStream) {
     return;
   }
 
-  stream.getTracks().forEach((track) => track.stop());
+  activeStream.getTracks().forEach((track) => track.stop());
+  activeStream = null;
 }
 
 async function waitForMetadata(video) {
@@ -45,25 +46,25 @@ function normalizeOptions(options = {}) {
   };
 }
 
-async function requestStream(facingMode) {
-  const constraints = buildConstraints(facingMode);
-  return navigator.mediaDevices.getUserMedia(constraints);
+function fallbackFacingMode(mode) {
+  return mode === "user" ? "environment" : "user";
 }
 
-function getFallbackMode(facingMode) {
-  return facingMode === "user" ? "environment" : "user";
-}
-
-function toErrorMessage(error) {
+function mapCameraError(error) {
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
     return "Camera access denied. Allow permission and reload.";
   }
 
   if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") {
-    return "No compatible camera found on this device.";
+    return "No compatible camera found for this mode.";
   }
 
   return "Unable to start camera stream.";
+}
+
+async function getStreamForFacingMode(facingMode) {
+  const constraints = buildConstraints(facingMode);
+  return navigator.mediaDevices.getUserMedia(constraints);
 }
 
 export async function initCamera(options = {}) {
@@ -77,19 +78,18 @@ export async function initCamera(options = {}) {
     throw new Error("Camera API is not supported in this browser.");
   }
 
-  stopStream(activeStream);
+  stopActiveStream();
 
   let stream;
-  let resolvedFacingMode = facingMode;
+  let resolvedMode = facingMode;
   try {
-    stream = await requestStream(facingMode);
+    stream = await getStreamForFacingMode(facingMode);
   } catch (primaryError) {
-    const fallbackMode = getFallbackMode(facingMode);
-    resolvedFacingMode = fallbackMode;
+    resolvedMode = fallbackFacingMode(facingMode);
     try {
-      stream = await requestStream(fallbackMode);
+      stream = await getStreamForFacingMode(resolvedMode);
     } catch {
-      throw new Error(toErrorMessage(primaryError));
+      throw new Error(mapCameraError(primaryError));
     }
   }
 
@@ -100,6 +100,6 @@ export async function initCamera(options = {}) {
   await video.play();
 
   activeStream = stream;
-  video.dataset.facingMode = resolvedFacingMode;
+  video.dataset.facingMode = resolvedMode;
   return video;
 }
