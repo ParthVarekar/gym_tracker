@@ -1,4 +1,4 @@
-﻿import {
+import {
   getCurrentFacingMode,
   initCamera,
   switchCamera
@@ -15,6 +15,7 @@ import {
   getTorsoLength
 } from "./angleUtils.js";
 import { resetRepCounter, updateRepCounter } from "./repCounter.js";
+import { detectStartSignal, isTrackingActive, resetStartGate } from "./startGate.js";
 import { calculateScore } from "./scoringEngine.js";
 import {
   addScore,
@@ -37,7 +38,7 @@ const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
 const appState = {
   currentExercise: getState().currentExercise,
   reps: 0,
-  phase: "idle",
+  phase: "not ready",
   motionLinesEnabled: true,
   statsExpanded: false,
   menuOpen: false,
@@ -50,8 +51,11 @@ const runtime = {
   mirrored: true
 };
 
+const START_PROMPT = "Not ready: double nod to start";
+
 let lastFrameTime = 0;
 let resizeDebounce = null;
+let startPromptShown = false;
 
 function resizeCanvas(video) {
   if (!video?.videoWidth || !video?.videoHeight) {
@@ -68,7 +72,7 @@ function resizeCanvas(video) {
 function updateHeaderFromTracking() {
   const tracking = getState();
   appState.reps = tracking.currentReps;
-  appState.phase = tracking.currentPhase;
+  appState.phase = isTrackingActive() ? tracking.currentPhase : "not ready";
   ui.setHeader(appState.reps, appState.phase, appState.currentExercise);
 }
 
@@ -83,6 +87,9 @@ function applyExerciseChange(exercise) {
   setExercise(exercise);
   resetTrackingState();
   resetRepCounter(exercise);
+  resetStartGate();
+  startPromptShown = false;
+  ui.setStatus(START_PROMPT);
   clearScorePanel();
   updateHeaderFromTracking();
 }
@@ -158,6 +165,23 @@ function runFrame(timestamp) {
     showMotionLines: appState.motionLinesEnabled
   });
 
+  if (!isTrackingActive()) {
+    const started = detectStartSignal(landmarks, timestamp);
+    if (!started) {
+      if (!startPromptShown) {
+        startPromptShown = true;
+        ui.setStatus(START_PROMPT);
+      }
+      updateHeaderFromTracking();
+      updatePanels();
+      requestAnimationFrame(runFrame);
+      return;
+    }
+
+    startPromptShown = false;
+    ui.setStatus("Tracking");
+  }
+
   const angles = extractAngles(landmarks, timestamp);
   const repData = updateRepCounter(angles, appState.currentExercise);
   if (repData) {
@@ -179,7 +203,13 @@ async function handleSwitchCamera() {
     runtime.mirrored = appState.cameraFacingMode === "user";
     ui.setCameraFacingMode(appState.cameraFacingMode);
     resizeCanvas(runtime.video);
-    ui.setStatus("Tracking");
+
+    if (isTrackingActive()) {
+      ui.setStatus("Tracking");
+    } else {
+      startPromptShown = false;
+      ui.setStatus(START_PROMPT);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to switch camera.";
     ui.setStatus(message, true);
@@ -243,7 +273,9 @@ async function startApp() {
     ui.setStatus("Loading pose model...");
     await initPose();
 
-    ui.setStatus("Tracking");
+    resetStartGate();
+    startPromptShown = false;
+    ui.setStatus(START_PROMPT);
     lastFrameTime = 0;
 
     window.addEventListener("resize", handleResize);
